@@ -1,0 +1,46 @@
+# Trinity Phase 2 - API Server Dockerfile (Lightweight)
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install only API-related dependencies
+RUN pip install --no-cache-dir \
+    fastapi==0.109.0 \
+    uvicorn==0.27.0 \
+    websockets==12.0 \
+    sqlalchemy==2.0.25 \
+    psycopg2-binary==2.9.9 \
+    pydantic==2.5.3 \
+    python-multipart==0.0.6 \
+    pyyaml==6.0.1 \
+    python-dotenv==1.0.0 \
+    pandas==2.1.4 \
+    numpy==1.26.4 \
+    loguru==0.7.2 \
+    pyjwt==2.8.0 \
+    bcrypt==4.1.2
+
+# Copy application code
+COPY trinity /app/trinity
+COPY config /app/config
+
+# Create necessary directories
+RUN mkdir -p /app/logs
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "trinity.api.server:app", "--host", "0.0.0.0", "--port", "8000"]

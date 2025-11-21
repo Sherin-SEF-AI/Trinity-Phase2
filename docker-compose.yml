@@ -1,0 +1,212 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  database:
+    image: postgres:15-alpine
+    container_name: trinity-database
+    environment:
+      POSTGRES_DB: trinity_av_testing
+      POSTGRES_USER: trinity_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-trinity_dev_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - trinity-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trinity_user -d trinity_av_testing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Trinity Main Application
+  trinity-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        - CUDA_VERSION=12.3.0
+    container_name: trinity-app
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=trinity_av_testing
+      - DB_USER=trinity_user
+      - DB_PASSWORD=${DB_PASSWORD:-trinity_dev_password}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./recordings:/app/recordings
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/video0:/dev/video0  # Camera 1
+      - /dev/video1:/dev/video1  # Camera 2
+      - /dev/video2:/dev/video2  # Camera 3
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+    privileged: true
+    networks:
+      - trinity-network
+    ports:
+      - "8000:8000"  # API
+      - "8001:8001"  # WebSocket
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # FastAPI Backend (separate service)
+  trinity-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: trinity-api
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=trinity_av_testing
+      - DB_USER=trinity_user
+      - DB_PASSWORD=${DB_PASSWORD:-trinity_dev_password}
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./recordings:/app/recordings:ro
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+    networks:
+      - trinity-network
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: uvicorn trinity.api.server:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # CARLA Simulator (optional, requires CARLA installation)
+  carla-simulator:
+    image: carlasim/carla:0.9.15
+    container_name: trinity-carla
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./exports/carla_scenarios:/home/carla/scenarios
+    networks:
+      - trinity-network
+    ports:
+      - "2000-2002:2000-2002"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: /bin/bash -c "CarlaUE4.sh -quality-level=Low -RenderOffScreen"
+    profiles:
+      - carla  # Only start with: docker-compose --profile carla up
+
+  # Redis (for caching and real-time data)
+  redis:
+    image: redis:7-alpine
+    container_name: trinity-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - trinity-network
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # pgAdmin (database management UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: trinity-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@trinity.local
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - trinity-network
+    ports:
+      - "5050:80"
+    restart: unless-stopped
+    profiles:
+      - admin  # Only start with: docker-compose --profile admin up
+
+  # Grafana (metrics visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: trinity-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - trinity-network
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    profiles:
+      - monitoring  # Only start with: docker-compose --profile monitoring up
+
+  # Prometheus (metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: trinity-prometheus
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - trinity-network
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+networks:
+  trinity-network:
+    driver: bridge
