@@ -1,0 +1,81 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+dist
+build
+*.egg
+.pytest_cache
+.coverage
+htmlcov
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data directories (mount as volumes instead)
+data/
+logs/
+reports/
+*.db
+*.db-journal
+*.db-wal
+
+# Models (download at runtime or mount)
+models/yolo/*.pt
+
+# Documentation
+docs/
+*.md
+!README.md
+!LICENSE
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+.cache
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints
+
+# Config (use environment-specific configs)
+config/*.yaml
+!config/config.example.yaml

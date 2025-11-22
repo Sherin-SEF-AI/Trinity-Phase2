@@ -1,0 +1,15 @@
+# Trinity Phase 2 - Grafana Dashboard Provisioning
+
+apiVersion: 1
+
+providers:
+  - name: 'Trinity Dashboards'
+    orgId: 1
+    folder: 'Trinity'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: true
