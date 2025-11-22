@@ -1,0 +1,175 @@
+# Trinity Phase 2 - CPU-Only Docker Compose
+# For systems without NVIDIA GPU support
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  database:
+    image: postgres:15-alpine
+    container_name: trinity-database
+    environment:
+      POSTGRES_DB: trinity_av_testing
+      POSTGRES_USER: trinity_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-trinity_dev_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - trinity-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trinity_user -d trinity_av_testing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Trinity Main Application (CPU-only)
+  trinity-app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cpu
+    container_name: trinity-app
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=trinity_av_testing
+      - DB_USER=trinity_user
+      - DB_PASSWORD=${DB_PASSWORD:-trinity_dev_password}
+      - TRINITY_USE_GPU=false
+      - TRINITY_DEVICE=cpu
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./recordings:/app/recordings
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    networks:
+      - trinity-network
+    ports:
+      - "8000:8000"  # API
+      - "8001:8001"  # WebSocket
+    restart: unless-stopped
+
+  # FastAPI Backend (separate service)
+  trinity-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: trinity-api
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=trinity_av_testing
+      - DB_USER=trinity_user
+      - DB_PASSWORD=${DB_PASSWORD:-trinity_dev_password}
+      - TRINITY_USE_GPU=false
+      - TRINITY_DEVICE=cpu
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./recordings:/app/recordings:ro
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+    networks:
+      - trinity-network
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: uvicorn trinity.api.server:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # Redis (for caching and real-time data)
+  redis:
+    image: redis:7-alpine
+    container_name: trinity-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - trinity-network
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # pgAdmin (database management UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: trinity-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@trinity.local
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - trinity-network
+    ports:
+      - "5050:80"
+    restart: unless-stopped
+    profiles:
+      - admin
+
+  # Grafana (metrics visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: trinity-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - trinity-network
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Prometheus (metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: trinity-prometheus
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - trinity-network
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+
+networks:
+  trinity-network:
+    driver: bridge
