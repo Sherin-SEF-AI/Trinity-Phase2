@@ -647,3 +647,126 @@ experiment_tracking:
   wandb:
     project: "trinity-phase2"
     entity: "your-team"
+
+# ============================================================================
+# Report Generation (Phase 5.2)
+# ============================================================================
+reporting:
+  enabled: true
+
+  # Report generator settings
+  generator:
+    # Basic settings
+    title: "Trinity Test Report"
+    subtitle: "Autonomous Vehicle Testing & Validation"
+    author: "Trinity Platform"
+    company: "Autonomous Vehicle Testing Suite"
+
+    # Default format
+    default_format: "pdf"  # pdf, html, excel, json
+    page_size: "letter"  # letter or A4
+
+    # Content settings
+    include_charts: true
+    include_images: true
+    include_statistics: true
+    include_raw_data: false
+
+    # Chart settings
+    chart_dpi: 150
+    chart_style: "seaborn-v0_8-darkgrid"
+
+    # Output settings
+    output_dir: "reports"
+    filename_template: "{report_type}_{session_id}_{timestamp}.{ext}"
+
+    # Branding colors
+    colors:
+      primary: "#2c3e50"
+      secondary: "#3498db"
+      success: "#27ae60"
+      warning: "#f39c12"
+      danger: "#e74c3c"
+
+  # Report scheduler settings
+  scheduler:
+    enabled: true
+    check_interval_seconds: 60
+
+    # Scheduled reports
+    schedules:
+      # Daily HTML summary at 6 PM
+      daily_summary:
+        enabled: true
+        report_type: "session_summary"
+        format: "html"
+        frequency: "daily"
+        hour: 18
+
+      # Weekly PDF full report on Monday at 9 AM
+      weekly_full:
+        enabled: true
+        report_type: "full_report"
+        format: "pdf"
+        frequency: "weekly"
+        day_of_week: 0  # 0=Monday, 6=Sunday
+        hour: 9
+
+      # Monthly Excel report on 1st at 8 AM
+      monthly_excel:
+        enabled: false
+        report_type: "full_report"
+        format: "excel"
+        frequency: "monthly"
+        day_of_month: 1
+        hour: 8
+
+      # Session-end report (triggered manually)
+      session_end:
+        enabled: true
+        report_type: "session_summary"
+        format: "html"
+        frequency: "session_end"
+
+  # Report templates
+  templates:
+    # Use custom templates
+    use_custom: false
+    template_dir: "config/report_templates"
+
+    # Available templates
+    available:
+      - "full_report"
+      - "safety_report"
+      - "edge_case_report"
+      - "quick_summary"
+
+  # Report delivery (optional)
+  delivery:
+    # Email delivery
+    email:
+      enabled: false
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587
+      use_tls: true
+      username: "your-email@example.com"
+      password: "your-app-password"
+      from_address: "trinity@example.com"
+      to_addresses:
+        - "stakeholder1@example.com"
+        - "stakeholder2@example.com"
+      subject_template: "Trinity Report: {report_type} - {session_name}"
+
+    # Cloud upload
+    cloud_upload:
+      enabled: false
+      provider: "s3"  # s3 or gcs
+      bucket: "trinity-reports"
+      prefix: "reports/"
+
+  # Report archiving
+  archiving:
+    enabled: true
+    max_age_days: 90  # Delete reports older than 90 days
+    compress_old_reports: true
+    compression_age_days: 30  # Compress reports older than 30 days
