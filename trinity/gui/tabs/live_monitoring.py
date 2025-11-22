@@ -18,6 +18,14 @@ from loguru import logger
 from trinity.core.camera_manager import CameraManager, SynchronizedFrames
 from trinity.core.recorder import MultiStreamRecorder
 
+# Phase 2: Detection & Tracking
+try:
+    from trinity.detection.detection_system import DetectionTrackingSystem
+    DETECTION_AVAILABLE = True
+except ImportError:
+    logger.warning("Detection system not available")
+    DETECTION_AVAILABLE = False
+
 
 class CameraFeedWidget(QLabel):
     """Widget for displaying camera feed"""
@@ -91,6 +99,12 @@ class MetricsWidget(QGroupBox):
         self.layout().addWidget(container)
         self.metrics_labels[name] = value_label
 
+    def add_detection_metrics(self):
+        """Add detection/tracking metrics to existing metrics widgets"""
+        for metrics_widget in self.metrics_widgets:
+            metrics_widget.add_metric("Detections", "0")
+            metrics_widget.add_metric("Tracks", "0")
+
     def update_metric(self, name: str, value: str):
         """Update metric value"""
         if name in self.metrics_labels:
@@ -109,10 +123,15 @@ class LiveMonitoringTab(QWidget):
         # Managers
         self.camera_manager: Optional[CameraManager] = None
         self.recorder: Optional[MultiStreamRecorder] = None
+        self.detection_system: Optional['DetectionTrackingSystem'] = None
 
         # UI components
         self.camera_feeds: List[CameraFeedWidget] = []
         self.metrics_widgets: List[MetricsWidget] = []
+
+        # Detection/tracking state
+        self.show_detections = False
+        self.show_tracks = False
 
         # Setup UI
         self.init_ui()
@@ -306,6 +325,28 @@ class LiveMonitoringTab(QWidget):
         self.recorder = recorder
         logger.info("Recorder set")
 
+    def set_detection_system(self, detection_system: 'DetectionTrackingSystem'):
+        """Set detection system instance"""
+        self.detection_system = detection_system
+
+        # Enable detection/tracking buttons
+        if DETECTION_AVAILABLE and self.detection_system:
+            self.show_detections_btn.setEnabled(True)
+            self.show_tracks_btn.setEnabled(True)
+
+            # Connect button signals
+            self.show_detections_btn.toggled.connect(self.on_show_detections_toggled)
+            self.show_tracks_btn.toggled.connect(self.on_show_tracks_toggled)
+
+            # Add detection metrics to panels
+            for metrics_widget in self.metrics_widgets:
+                if "Detections" not in metrics_widget.metrics_labels:
+                    metrics_widget.add_metric("Detections", "0")
+                if "Tracks" not in metrics_widget.metrics_labels:
+                    metrics_widget.add_metric("Tracks", "0")
+
+        logger.info("Detection system set")
+
     def update_feeds(self):
         """Update camera feeds and metrics"""
         if self.camera_manager is None:
@@ -316,11 +357,29 @@ class LiveMonitoringTab(QWidget):
             frames = self.camera_manager.get_synchronized_frames(timeout=0.1)
 
             if frames and len(frames.frames) > 0:
+                # Process through detection system if enabled
+                detection_result = None
+                visualized_frames = []
+
+                if self.detection_system and (self.show_detections or self.show_tracks):
+                    # Process frames through detection system
+                    detection_result = self.detection_system.process_frames(frames)
+
+                    # Visualize results
+                    frame_list = [cf.frame for cf in frames.frames]
+                    visualized_frames = self.detection_system.visualize_results(
+                        frame_list,
+                        detection_result,
+                        show_detections=self.show_detections,
+                        show_tracks=self.show_tracks
+                    )
+
                 # Update feeds
                 for i, camera_frame in enumerate(frames.frames):
                     if i < len(self.camera_feeds):
-                        # Update frame display
-                        self.camera_feeds[i].update_frame(camera_frame.frame)
+                        # Use visualized frame if available, otherwise original
+                        display_frame = visualized_frames[i] if visualized_frames else camera_frame.frame
+                        self.camera_feeds[i].update_frame(display_frame)
 
                         # Update metrics
                         if i < len(self.metrics_widgets):
@@ -333,6 +392,22 @@ class LiveMonitoringTab(QWidget):
                                 "Resolution",
                                 f"{camera_frame.resolution[0]}x{camera_frame.resolution[1]}"
                             )
+
+                            # Add detection metrics if available
+                            if detection_result:
+                                if i < len(detection_result.detections_per_camera):
+                                    num_detections = len(detection_result.detections_per_camera[i])
+                                    self.metrics_widgets[i].update_metric(
+                                        "Detections",
+                                        str(num_detections)
+                                    ) if "Detections" in self.metrics_widgets[i].metrics_labels else None
+
+                                if i < len(detection_result.tracks_per_camera):
+                                    num_tracks = len(detection_result.tracks_per_camera[i])
+                                    self.metrics_widgets[i].update_metric(
+                                        "Tracks",
+                                        str(num_tracks)
+                                    ) if "Tracks" in self.metrics_widgets[i].metrics_labels else None
 
                 # Update sync status
                 self.sync_status_label.setText(
@@ -391,3 +466,13 @@ class LiveMonitoringTab(QWidget):
         """Handle view mode change"""
         logger.info(f"View mode changed to: {mode}")
         # Implementation for different view modes coming in Phase 2
+
+    def on_show_detections_toggled(self, checked: bool):
+        """Handle show detections toggle"""
+        self.show_detections = checked
+        logger.info(f"Show detections: {checked}")
+
+    def on_show_tracks_toggled(self, checked: bool):
+        """Handle show tracks toggle"""
+        self.show_tracks = checked
+        logger.info(f"Show tracks: {checked}")

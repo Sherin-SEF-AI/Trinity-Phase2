@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self.camera_manager: Optional[CameraManager] = None
         self.recorder: Optional[MultiStreamRecorder] = None
         self.db_manager: Optional[DatabaseManager] = None
+        self.detection_system = None
 
         # Application state
         self.current_session_id: Optional[int] = None
@@ -346,10 +347,27 @@ class MainWindow(QMainWindow):
             # Update UI
             self.session_started.emit(self.current_session_id)
 
-            # Pass camera manager to live tab
+            # Initialize detection system (Phase 2)
+            if self.detection_system is None:
+                try:
+                    from trinity.detection.detection_system import DetectionTrackingSystem
+                    self.detection_system = DetectionTrackingSystem(
+                        config=self.config,
+                        num_cameras=3,
+                        enable_detection=True,
+                        enable_tracking=True,
+                        enable_3d_estimation=False  # Requires calibration
+                    )
+                    logger.success("Detection system initialized")
+                except Exception as e:
+                    logger.warning(f"Detection system not available: {e}")
+
+            # Pass managers to live tab
             if hasattr(self, 'live_tab'):
                 self.live_tab.set_camera_manager(self.camera_manager)
                 self.live_tab.set_recorder(self.recorder)
+                if self.detection_system:
+                    self.live_tab.set_detection_system(self.detection_system)
 
             logger.success(f"Session started: ID {self.current_session_id}")
 
